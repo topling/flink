@@ -305,6 +305,9 @@ class RocksDBHandle implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
+        if (RocksDBOperationUtils.TOPLINGDB_REPO != null) {
+            RocksDBOperationUtils.TOPLINGDB_REPO.removeOneDB(db);
+        }
         IOUtils.closeQuietly(defaultColumnFamilyHandle);
         IOUtils.closeQuietly(nativeMetricMonitor);
         IOUtils.closeQuietly(db);

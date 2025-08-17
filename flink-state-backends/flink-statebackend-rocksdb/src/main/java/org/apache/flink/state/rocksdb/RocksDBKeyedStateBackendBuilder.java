@@ -436,6 +436,9 @@ public class RocksDBKeyedStateBackendBuilder<K> extends AbstractKeyedStateBacken
                             manualCompactionManager);
         } catch (Throwable e) {
             // Do clean up
+            if (RocksDBOperationUtils.TOPLINGDB_REPO != null) {
+                RocksDBOperationUtils.TOPLINGDB_REPO.removeOneDB(db);
+            }
             List<ColumnFamilyOptions> columnFamilyOptions =
                     new ArrayList<>(kvStateInformation.values().size());
             IOUtils.closeQuietly(cancelRegistryForBackend);

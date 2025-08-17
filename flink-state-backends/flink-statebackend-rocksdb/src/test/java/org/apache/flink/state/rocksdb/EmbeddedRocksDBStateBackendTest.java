@@ -240,6 +240,9 @@ public class EmbeddedRocksDBStateBackendTest
     // small safety net for instance cleanups, so that no native objects are left
     @AfterEach
     public void cleanupRocksDB() {
+        if (RocksDBOperationUtils.TOPLINGDB_REPO != null) {
+            RocksDBOperationUtils.TOPLINGDB_REPO.removeOneDB(db);
+        }
         if (keyedStateBackend != null) {
             IOUtils.closeQuietly(keyedStateBackend);
             keyedStateBackend.dispose();

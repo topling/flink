@@ -943,6 +943,9 @@ public class RocksDBIncrementalRestoreOperation<K> implements RocksDBRestoreOper
 
         @Override
         public void close() {
+            if (RocksDBOperationUtils.TOPLINGDB_REPO != null) {
+                RocksDBOperationUtils.TOPLINGDB_REPO.removeOneDB(db);
+            }
             List<ColumnFamilyOptions> columnFamilyOptions =
                     new ArrayList<>(columnFamilyDescriptors.size() + 1);
             columnFamilyDescriptors.forEach((cfd) -> columnFamilyOptions.add(cfd.getOptions()));

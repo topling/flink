@@ -474,6 +474,9 @@ public class RocksDBKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
         // disposed, as
         // working on the disposed object results in SEGFAULTS.
         if (db != null) {
+            if (RocksDBOperationUtils.TOPLINGDB_REPO != null) {
+                RocksDBOperationUtils.TOPLINGDB_REPO.removeOneDB(db);
+            }
             IOUtils.closeQuietly(writeBatchWrapper);
 
             // Metric collection occurs on a background thread. When this method returns

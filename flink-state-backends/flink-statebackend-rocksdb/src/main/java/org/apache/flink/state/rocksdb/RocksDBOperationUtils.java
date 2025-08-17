@@ -29,6 +29,11 @@ import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.OperatingSystem;
 import org.apache.flink.util.Preconditions;
 
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.MapperFeature;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
+
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -38,6 +43,7 @@ import org.rocksdb.ImportColumnFamilyOptions;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.SidePluginRepo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,6 +71,7 @@ public class RocksDBOperationUtils {
             ColumnFamilyOptions columnFamilyOptions,
             DBOptions dbOptions)
             throws IOException {
+        // System.err.printf("RocksDBOperationUtils.openDB: %s%n", path);
         List<ColumnFamilyDescriptor> columnFamilyDescriptors =
                 new ArrayList<>(1 + stateColumnFamilyDescriptors.size());
 
@@ -86,7 +93,7 @@ public class RocksDBOperationUtils {
             }
 
             dbRef =
-                    RocksDB.open(
+                    toplingdbOpen(
                             Preconditions.checkNotNull(dbOptions),
                             path,
                             columnFamilyDescriptors,
@@ -106,6 +113,81 @@ public class RocksDBOperationUtils {
                 1 + stateColumnFamilyDescriptors.size() == stateColumnFamilyHandles.size(),
                 "Not all requested column family handles have been created");
         return dbRef;
+    }
+
+    private static final String FLINK_TOPLING_CONF = System.getenv("FLINK_TOPLINGDB_CONF");
+
+    static SidePluginRepo loadToplingSidePluginRepo() {
+        if (FLINK_TOPLING_CONF == null) {
+            return null;
+        }
+        SidePluginRepo r = null;
+        try {
+            r = new SidePluginRepo();
+            r.importAutoFile(FLINK_TOPLING_CONF);
+        } catch (RocksDBException e) {
+            throw new RuntimeException(
+                    "Failed to load toplingdb conf from " + FLINK_TOPLING_CONF, e);
+        }
+        return r;
+    }
+
+    public static final SidePluginRepo TOPLINGDB_REPO = loadToplingSidePluginRepo();
+
+    public static RocksDB toplingdbOpen(
+            final DBOptions dbOptions,
+            final String path,
+            final List<ColumnFamilyDescriptor> columnFamilyDescriptors,
+            final List<ColumnFamilyHandle> columnFamilyHandles)
+            throws RocksDBException {
+        // System.err.printf("RocksDBOperationUtils.toplingdbOpen: %s%n", FLINK_TOPLING_CONF);
+        if (TOPLINGDB_REPO == null) {
+            return RocksDB.open(dbOptions, path, columnFamilyDescriptors, columnFamilyHandles);
+        }
+        String dboName = dboNameOf(path);
+        ObjectMapper omapper = new ObjectMapper();
+        omapper.disable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+        omapper.disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY);
+        ObjectNode root = omapper.createObjectNode();
+        root.putObject("DBOptions").putObject(dboName).put("update_from", "dbo");
+        ObjectNode cfoMap = root.putObject("CFOptions");
+        ObjectNode dbNode = root.putObject("databases").putObject(path);
+        dbNode.put("method", "DB::Open");
+        dbNode = dbNode.putObject("params");
+        dbNode.put("db_options", dboName);
+        dbNode.put("path", path);
+        ObjectNode dbcfoNode = dbNode.putObject("column_families");
+        for (ColumnFamilyDescriptor cfd : columnFamilyDescriptors) {
+            String cfName = cfd.getName() == null ? "default" : new String(cfd.getName());
+            String cfoName = cfoNameOf(path, cfName);
+            cfoMap.putObject(cfoName).put("update_from", "default");
+            dbcfoNode.put(cfName, cfoName);
+        }
+        String strJson;
+        try {
+            strJson = omapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize toplingdb json config", e);
+        }
+        // System.err.printf("toplingdb openDB: %s\n", strJson);
+        synchronized (TOPLINGDB_REPO) {
+            for (ColumnFamilyDescriptor cfdesc : columnFamilyDescriptors) {
+                String cfName = new String(cfdesc.getName());
+                String cfoName = "cfo-" + path + "-" + cfName;
+                TOPLINGDB_REPO.put(cfoName, cfdesc.getOptions());
+            }
+            TOPLINGDB_REPO.put(dboName, dbOptions);
+            TOPLINGDB_REPO.importJson(strJson);
+            return TOPLINGDB_REPO.openDB(path, columnFamilyHandles);
+        }
+    }
+
+    private static String cfoNameOf(String path, String cfName) {
+        return "cfo-" + path + "-" + cfName;
+    }
+
+    private static String dboNameOf(String path) {
+        return "dbo-" + path;
     }
 
     public static RocksIteratorWrapper getRocksIterator(
@@ -287,6 +369,38 @@ public class RocksDBOperationUtils {
             throw new InterruptedException("The thread was interrupted, aborting recovery");
         } else if (cancelStreamRegistryForRestore.isClosed()) {
             throw new CancelTaskException("The stream was closed, aborting recovery");
+        }
+
+        if (TOPLINGDB_REPO != null) {
+            String path = db.getName();
+            String cfName = new String(columnDescriptor.getName());
+            String cfoName = cfoNameOf(path, cfName);
+            ObjectMapper omapper = new ObjectMapper();
+            ObjectNode root = omapper.createObjectNode();
+            root.putObject("CFOptions").putObject(cfoName).put("update_from", "default");
+            String strJson;
+            try {
+                strJson = omapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to serialize toplingdb json config", e);
+            }
+            synchronized (TOPLINGDB_REPO) {
+                TOPLINGDB_REPO.put(cfoName, columnDescriptor.getOptions());
+                TOPLINGDB_REPO.importJson(strJson); // update cfoName
+                if (importFilesMetaData.isEmpty()) {
+                    return TOPLINGDB_REPO.createCF(db, cfName, cfoName);
+                } else {
+                    try (ImportColumnFamilyOptions importColumnFamilyOptions =
+                            new ImportColumnFamilyOptions().setMoveFiles(true)) {
+                        return TOPLINGDB_REPO.createCFWithImport(
+                                db,
+                                cfName,
+                                cfoName,
+                                importColumnFamilyOptions,
+                                importFilesMetaData);
+                    }
+                }
+            }
         }
 
         if (importFilesMetaData.isEmpty()) {

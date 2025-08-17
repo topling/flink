@@ -193,7 +193,7 @@ public class RocksDBExtension implements BeforeEachCallback, AfterEachCallback {
         this.readOptions = new ReadOptions();
         this.columnFamilyHandles = new ArrayList<>(1);
         this.rocksDB =
-                RocksDB.open(
+                RocksDBOperationUtils.toplingdbOpen(
                         dbOptions,
                         rocksFolder.getAbsolutePath(),
                         Collections.singletonList(
@@ -205,6 +205,9 @@ public class RocksDBExtension implements BeforeEachCallback, AfterEachCallback {
 
     public void after() throws Exception {
         // destruct in reversed order of creation.
+        if (RocksDBOperationUtils.TOPLINGDB_REPO != null) {
+            RocksDBOperationUtils.TOPLINGDB_REPO.removeOneDB(rocksDB);
+        }
         IOUtils.closeQuietly(this.batchWrapper);
         for (ColumnFamilyHandle columnFamilyHandle : columnFamilyHandles) {
             IOUtils.closeQuietly(columnFamilyHandle);
