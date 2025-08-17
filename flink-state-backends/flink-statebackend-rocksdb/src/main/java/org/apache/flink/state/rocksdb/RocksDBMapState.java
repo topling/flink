@@ -549,6 +549,9 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
         }
     }
 
+    private static final boolean DEFAULT_CACHING =
+            Boolean.parseBoolean(System.getenv("FLINK_ROCKSDB_MAP_STATE_ITER_ENABLE_CACHE"));
+
     /** An auxiliary utility to scan all entries under the given key. */
     private abstract class RocksDBMapIterator<T> implements Iterator<T> {
 
@@ -584,6 +587,9 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
         private final TypeSerializer<UV> valueSerializer;
         private final DataInputDeserializer dataInputView;
 
+        private RocksIteratorWrapper iter;
+        private byte[] keyCache;
+
         RocksDBMapIterator(
                 final RocksDB db,
                 final byte[] keyPrefixBytes,
@@ -596,10 +602,33 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
             this.keySerializer = keySerializer;
             this.valueSerializer = valueSerializer;
             this.dataInputView = dataInputView;
+
+            if (!DEFAULT_CACHING) {
+                iter =
+                        RocksDBOperationUtils.getRocksIterator(
+                                db, columnFamily, backend.getReadOptions());
+                iter.seek(keyPrefixBytes);
+            }
         }
 
         @Override
         public boolean hasNext() {
+            if (!DEFAULT_CACHING) {
+                if (iter == null) {
+                    return false;
+                }
+                if (iter.isValid()) {
+                    keyCache = iter.key();
+                    if (startWithKeyPrefix(keyPrefixBytes, keyCache)) {
+                        return true;
+                    }
+                }
+                keyCache = null;
+                iter.close();
+                iter = null;
+                return false;
+            }
+
             loadCache();
 
             return (cacheIndex < cacheEntries.size());
@@ -616,6 +645,23 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
         }
 
         final RocksDBMapEntry nextEntry() {
+            if (!DEFAULT_CACHING) {
+                if (keyCache == null) {
+                    return null;
+                }
+                currentEntry =
+                        new RocksDBMapEntry(
+                                db,
+                                keyPrefixBytes.length,
+                                keyCache,
+                                iter.value(),
+                                keySerializer,
+                                valueSerializer,
+                                dataInputView);
+                iter.next();
+                return currentEntry;
+            }
+
             loadCache();
 
             if (cacheIndex == cacheEntries.size()) {
@@ -633,6 +679,9 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
         }
 
         private void loadCache() {
+            if (!DEFAULT_CACHING) {
+                return;
+            }
             if (cacheIndex > cacheEntries.size()) {
                 throw new IllegalStateException();
             }

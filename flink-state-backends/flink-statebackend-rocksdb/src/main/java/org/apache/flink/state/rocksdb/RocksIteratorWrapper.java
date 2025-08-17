@@ -47,6 +47,8 @@ import java.nio.ByteBuffer;
 public class RocksIteratorWrapper implements RocksIteratorInterface, Closeable {
 
     private RocksIterator iterator;
+    private int counterForDatabaseGC = 0;
+    private static final int COUNTER_FOR_DATABASE_GC_MAX = 10_000;
 
     public RocksIteratorWrapper(@Nonnull RocksIterator iterator) {
         this.iterator = iterator;
@@ -62,43 +64,59 @@ public class RocksIteratorWrapper implements RocksIteratorInterface, Closeable {
         return isValid;
     }
 
+    private void maybeDatabaseGC(int inc) {
+        counterForDatabaseGC += inc;
+        if (counterForDatabaseGC >= COUNTER_FOR_DATABASE_GC_MAX) {
+            counterForDatabaseGC = 0;
+            refreshForDatabaseGC();
+        }
+    }
+
     @Override
     public void seekToFirst() {
+        maybeDatabaseGC(10);
         iterator.seekToFirst();
     }
 
     @Override
     public void seekToLast() {
+        maybeDatabaseGC(10);
         iterator.seekToLast();
     }
 
     @Override
     public void seek(byte[] target) {
+        maybeDatabaseGC(10);
         iterator.seek(target);
     }
 
     @Override
     public void seekForPrev(byte[] target) {
+        maybeDatabaseGC(10);
         iterator.seekForPrev(target);
     }
 
     @Override
     public void seek(ByteBuffer target) {
+        maybeDatabaseGC(10);
         iterator.seek(target);
     }
 
     @Override
     public void seekForPrev(ByteBuffer target) {
+        maybeDatabaseGC(10);
         iterator.seekForPrev(target);
     }
 
     @Override
     public void next() {
+        maybeDatabaseGC(1);
         iterator.next();
     }
 
     @Override
     public void prev() {
+        maybeDatabaseGC(1);
         iterator.prev();
     }
 
@@ -115,6 +133,14 @@ public class RocksIteratorWrapper implements RocksIteratorInterface, Closeable {
     public void refresh() throws RocksDBException {
         iterator.refresh();
         status();
+    }
+
+    public void refreshForDatabaseGC() {
+        try {
+            iterator.refreshForDatabaseGC();
+        } catch (RocksDBException ex) {
+            throw new FlinkRuntimeException("Internal exception found in RocksDB", ex);
+        }
     }
 
     public byte[] key() {
