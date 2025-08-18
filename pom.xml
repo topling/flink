@@ -1778,7 +1778,11 @@ under the License.
 								<include>${test.unit.pattern}</include>
 							</includes>
 							<forkCount>${flink.forkCountUnitTest}</forkCount>
-							<argLine>${flink.surefire.baseArgLine} -Xmx${flink.XmxUnitTest}</argLine>
+							<argLine>
+								--add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+								${flink.surefire.baseArgLine}
+								-Xmx${flink.XmxUnitTest}
+							</argLine>
 						</configuration>
 					</execution>
 					<!--execute all the integration tests-->
@@ -1799,7 +1803,11 @@ under the License.
 								<exclude>**/*$*</exclude>
 							</excludes>
 							<forkCount>${flink.forkCountITCase}</forkCount>
-							<argLine>${flink.surefire.baseArgLine} -Xmx${flink.XmxITCase}</argLine>
+							<argLine>
+								--add-opens java.base/jdk.internal.misc=ALL-UNNAMED
+								${flink.surefire.baseArgLine}
+								-Xmx${flink.XmxITCase}
+							</argLine>
 							<reuseForks>false</reuseForks>
 						</configuration>
 					</execution>
