@@ -129,4 +129,8 @@ public class RocksIteratorWrapper implements RocksIteratorInterface, Closeable {
     public void close() {
         iterator.close();
     }
+
+    public final void enableEagerFetchValue(boolean b) {
+        iterator.enableEagerFetchValue(b);
+    }
 }

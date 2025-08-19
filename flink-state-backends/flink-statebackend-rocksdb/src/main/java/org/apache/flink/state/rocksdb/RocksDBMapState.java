@@ -187,6 +187,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
 
         return () ->
                 new RocksDBMapIterator<UK>(
+                        false, // needsIterValue
                         backend.db,
                         prefixBytes,
                         userKeySerializer,
@@ -207,6 +208,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
 
         return () ->
                 new RocksDBMapIterator<UV>(
+                        true, // needsIterValue
                         backend.db,
                         prefixBytes,
                         userKeySerializer,
@@ -255,7 +257,12 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
         final byte[] prefixBytes = serializeCurrentKeyWithGroupAndNamespace();
 
         return new RocksDBMapIterator<Map.Entry<UK, UV>>(
-                backend.db, prefixBytes, userKeySerializer, userValueSerializer, dataInputView) {
+                true, // needsIterValue, assume it always needs values
+                backend.db,
+                prefixBytes,
+                userKeySerializer,
+                userValueSerializer,
+                dataInputView) {
             @Override
             public Map.Entry<UK, UV> next() {
                 return nextEntry();
@@ -271,6 +278,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
                 RocksDBOperationUtils.getRocksIterator(
                         backend.db, columnFamily, backend.getReadOptions())) {
 
+            iterator.enableEagerFetchValue(false);
             iterator.seek(prefixBytes);
 
             return !iterator.isValid() || !startWithKeyPrefix(prefixBytes, iterator.key());
@@ -289,6 +297,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
                                 backend.getWriteBatchSize())) {
 
             final byte[] keyPrefixBytes = serializeCurrentKeyWithGroupAndNamespace();
+            iterator.enableEagerFetchValue(false);
             iterator.seek(keyPrefixBytes);
 
             while (iterator.isValid()) {
@@ -355,6 +364,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
 
         final Iterator<Map.Entry<UK, UV>> iterator =
                 new RocksDBMapIterator<Map.Entry<UK, UV>>(
+                        true, // needsIterValue, assume it always needs values
                         backend.db,
                         keyPrefixBytes,
                         dupUserKeySerializer,
@@ -458,7 +468,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
                 @Nonnull final RocksDB db,
                 @Nonnegative final int userKeyOffset,
                 @Nonnull final byte[] rawKeyBytes,
-                @Nonnull final byte[] rawValueBytes,
+                final byte[] rawValueBytes,
                 @Nonnull final TypeSerializer<UK> keySerializer,
                 @Nonnull final TypeSerializer<UV> valueSerializer,
                 @Nonnull DataInputDeserializer dataInputView) {
@@ -569,6 +579,8 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
          */
         private boolean expired = false;
 
+        private boolean needsIterValue;
+
         /** A in-memory cache for the entries in the rocksdb. */
         private ArrayList<RocksDBMapEntry> cacheEntries = new ArrayList<>();
 
@@ -585,12 +597,14 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
         private final DataInputDeserializer dataInputView;
 
         RocksDBMapIterator(
+                final boolean needsIterValue,
                 final RocksDB db,
                 final byte[] keyPrefixBytes,
                 final TypeSerializer<UK> keySerializer,
                 final TypeSerializer<UV> valueSerializer,
                 DataInputDeserializer dataInputView) {
 
+            this.needsIterValue = needsIterValue;
             this.db = db;
             this.keyPrefixBytes = keyPrefixBytes;
             this.keySerializer = keySerializer;
@@ -660,6 +674,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
                 cacheEntries.clear();
                 cacheIndex = 0;
 
+                iterator.enableEagerFetchValue(needsIterValue);
                 iterator.seek(startBytes);
 
                 /*
@@ -686,7 +701,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
                                     db,
                                     keyPrefixBytes.length,
                                     iterator.key(),
-                                    iterator.value(),
+                                    needsIterValue ? iterator.value() : null,
                                     keySerializer,
                                     valueSerializer,
                                     dataInputView);
