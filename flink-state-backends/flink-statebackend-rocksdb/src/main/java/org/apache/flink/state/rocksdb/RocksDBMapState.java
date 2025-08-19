@@ -171,9 +171,7 @@ class RocksDBMapState<K, N, UK, UV> extends AbstractRocksDBState<K, N, Map<UK, U
     public boolean contains(UK userKey) throws IOException, RocksDBException {
         byte[] rawKeyBytes =
                 serializeCurrentKeyWithGroupAndNamespacePlusUserKey(userKey, userKeySerializer);
-        byte[] rawValueBytes = backend.db.get(columnFamily, rawKeyBytes);
-
-        return (rawValueBytes != null);
+        return backend.db.keyExists(columnFamily, rawKeyBytes);
     }
 
     @Override
