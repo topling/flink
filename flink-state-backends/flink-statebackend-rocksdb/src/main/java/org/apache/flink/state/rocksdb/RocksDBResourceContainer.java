@@ -20,7 +20,7 @@ package org.apache.flink.state.rocksdb;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.configuration.ConfigOption;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.runtime.memory.OpaqueMemoryResource;
 import org.apache.flink.util.FileUtils;
@@ -96,15 +96,19 @@ public final class RocksDBResourceContainer implements AutoCloseable {
 
     @Nullable private Path relocatedDbLogBaseDir;
 
+    private static ReadableConfig loadConfiguration() {
+        return GlobalConfiguration.loadConfiguration();
+    }
+
     @VisibleForTesting
     public RocksDBResourceContainer() {
-        this(new Configuration(), PredefinedOptions.DEFAULT, null, null, null, false);
+        this(loadConfiguration(), PredefinedOptions.DEFAULT, null, null, null, false);
     }
 
     @VisibleForTesting
     public RocksDBResourceContainer(
             PredefinedOptions predefinedOptions, @Nullable RocksDBOptionsFactory optionsFactory) {
-        this(new Configuration(), predefinedOptions, optionsFactory, null, null, false);
+        this(loadConfiguration(), predefinedOptions, optionsFactory, null, null, false);
     }
 
     @VisibleForTesting
@@ -112,7 +116,7 @@ public final class RocksDBResourceContainer implements AutoCloseable {
             PredefinedOptions predefinedOptions,
             @Nullable RocksDBOptionsFactory optionsFactory,
             @Nullable OpaqueMemoryResource<RocksDBSharedResources> sharedResources) {
-        this(new Configuration(), predefinedOptions, optionsFactory, sharedResources, null, false);
+        this(loadConfiguration(), predefinedOptions, optionsFactory, sharedResources, null, false);
     }
 
     public RocksDBResourceContainer(
