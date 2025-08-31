@@ -41,6 +41,12 @@ under the License.
 			-->--add-opens=java.base/java.util=ALL-UNNAMED
 		</surefire.module.config>
 	</properties>
+	<repositories>
+		<repository>
+			<id>cn.topling</id>
+			<url>https://topling-tools.oss-cn-qingdao.aliyuncs.com/toplingdb/</url>
+		</repository>
+	</repositories>
 
 	<dependencies>
 
@@ -61,7 +67,7 @@ under the License.
 		</dependency>
 
 		<dependency>
-			<groupId>com.ververica</groupId>
+			<groupId>cn.topling</groupId>
 			<artifactId>frocksdbjni</artifactId>
 			<version>8.10.2-topling-1.0</version>
 		</dependency>
