@@ -39,6 +39,8 @@ import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
 import org.rocksdb.ExportImportFilesMetaData;
+import org.rocksdb.FlinkCompactionFilter;
+import org.rocksdb.FlinkCompactionFilter.FlinkCompactionFilterFactory;
 import org.rocksdb.ImportColumnFamilyOptions;
 import org.rocksdb.ReadOptions;
 import org.rocksdb.RocksDB;
@@ -115,6 +117,9 @@ public class RocksDBOperationUtils {
         return dbRef;
     }
 
+    private static final int TOPLINGDB_DEBUG_LEVEL =
+            Integer.parseInt(System.getenv("SidePluginRepo_DebugLevel"));
+
     private static final String FLINK_TOPLING_CONF = System.getenv("FLINK_TOPLINGDB_CONF");
 
     static SidePluginRepo loadToplingSidePluginRepo() {
@@ -160,7 +165,7 @@ public class RocksDBOperationUtils {
         for (ColumnFamilyDescriptor cfd : columnFamilyDescriptors) {
             String cfName = cfd.getName() == null ? "default" : new String(cfd.getName());
             String cfoName = cfoNameOf(path, cfName);
-            cfoMap.putObject(cfoName).put("update_from", "default");
+            jsonPutCFO(root, cfoMap, cfoName, cfd);
             dbcfoNode.put(cfName, cfoName);
         }
         String strJson;
@@ -169,7 +174,9 @@ public class RocksDBOperationUtils {
         } catch (Exception e) {
             throw new RuntimeException("Failed to serialize toplingdb json config", e);
         }
-        // System.err.printf("toplingdb openDB: %s\n", strJson);
+        if (TOPLINGDB_DEBUG_LEVEL >= 1) {
+            System.err.printf("toplingdb openDB: %s%n", strJson);
+        }
         synchronized (TOPLINGDB_REPO) {
             for (ColumnFamilyDescriptor cfdesc : columnFamilyDescriptors) {
                 String cfName = new String(cfdesc.getName());
@@ -357,6 +364,56 @@ public class RocksDBOperationUtils {
                 .setMergeOperatorName(MERGE_OPERATOR_NAME);
     }
 
+    private static final boolean FLINK_TOPLING_USE_DCOMPACT =
+            Boolean.parseBoolean(System.getenv("FLINK_TOPLING_USE_DCOMPACT"));
+
+    // cfoName is not cfName
+    private static void jsonPutCFO(
+            ObjectNode root, ObjectNode cfoMap, String cfoName, ColumnFamilyDescriptor cfd) {
+        ObjectNode cfoNode = cfoMap.putObject(cfoName);
+        cfoNode.put("update_from", "default");
+        if (!FLINK_TOPLING_USE_DCOMPACT) {
+            return;
+        }
+        ColumnFamilyOptions cfo = cfd.getOptions();
+        // String cfName = new String(cfd.getName());
+        String mergeOpName = cfo.mergeOperatorName();
+        if (mergeOpName != null) {
+            cfoNode.put("merge_operator", "the_" + mergeOpName);
+        }
+        if (cfo.compactionFilterFactory() != null) {
+            var fac = (FlinkCompactionFilterFactory) cfo.compactionFilterFactory();
+            FlinkCompactionFilter.Config conf = fac.getConfig();
+            if (TOPLINGDB_DEBUG_LEVEL >= 1) {
+                System.err.printf("toplingdb compactionFilter conf: %s%n", conf);
+            }
+            if (conf != null
+                    && (conf.getStateType() != FlinkCompactionFilter.StateType.List
+                            || conf.getFixedElementLength() > 0)) {
+                String facVarName = "compact_filter_" + cfoName;
+                ObjectNode facNode = root.with("CompactionFilterFactory").with(facVarName);
+                // String facName = cfo.compactionFilterFactory().name();
+                // assert(facName.equals("FlinkCompactionFilterFactory"));
+                facNode.put("class", "FlinkCompactionFilterFactory");
+                ObjectNode params = facNode.putObject("params");
+                params.put("timestamp_offset", conf.getTimestampOffset());
+                if (conf.getStateType() == FlinkCompactionFilter.StateType.List) {
+                    assert (conf.getFixedElementLength() > 8);
+                    params.put("list_elem_fixed_len", conf.getFixedElementLength());
+                } else {
+                    params.put("list_elem_fixed_len", 0); // not list
+                }
+                params.put("ttl", conf.getTTL());
+                params.put("query_time_after_num_entries", conf.getQueryTimeAfterNumEntries());
+                cfoNode.put("compaction_filter_factory", facVarName);
+            }
+        } else {
+            if (TOPLINGDB_DEBUG_LEVEL >= 1) {
+                System.err.println("toplingdb compactionFilterFactory = null");
+            }
+        }
+    }
+
     private static ColumnFamilyHandle createColumnFamily(
             ColumnFamilyDescriptor columnDescriptor,
             RocksDB db,
@@ -377,7 +434,7 @@ public class RocksDBOperationUtils {
             String cfoName = cfoNameOf(path, cfName);
             ObjectMapper omapper = new ObjectMapper();
             ObjectNode root = omapper.createObjectNode();
-            root.putObject("CFOptions").putObject(cfoName).put("update_from", "default");
+            jsonPutCFO(root, root.putObject("CFOptions"), cfoName, columnDescriptor);
             String strJson;
             try {
                 strJson = omapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
@@ -385,6 +442,9 @@ public class RocksDBOperationUtils {
                 throw new RuntimeException("Failed to serialize toplingdb json config", e);
             }
             synchronized (TOPLINGDB_REPO) {
+                if (TOPLINGDB_DEBUG_LEVEL >= 1) {
+                    System.err.printf("toplingdb createCF: %s%n", strJson);
+                }
                 TOPLINGDB_REPO.put(cfoName, columnDescriptor.getOptions());
                 TOPLINGDB_REPO.importJson(strJson); // update cfoName
                 if (importFilesMetaData.isEmpty()) {
