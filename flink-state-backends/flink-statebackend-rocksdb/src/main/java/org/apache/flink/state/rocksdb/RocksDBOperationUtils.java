@@ -34,6 +34,7 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.apache.commons.lang3.math.NumberUtils;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -116,7 +117,7 @@ public class RocksDBOperationUtils {
     }
 
     private static final int TOPLINGDB_DEBUG_LEVEL =
-            Integer.parseInt(System.getenv("SidePluginRepo_DebugLevel"));
+            NumberUtils.toInt(System.getenv("SidePluginRepo_DebugLevel"), 0);
 
     private static final String FLINK_TOPLING_CONF = System.getenv("FLINK_TOPLINGDB_CONF");
 
@@ -163,7 +164,7 @@ public class RocksDBOperationUtils {
         for (ColumnFamilyDescriptor cfd : columnFamilyDescriptors) {
             String cfName = cfd.getName() == null ? "default" : new String(cfd.getName());
             String cfoName = cfoNameOf(path, cfName);
-            jsonPutCFO(root, cfoMap, cfoName, cfd);
+            cfoMap.putObject(cfoName).put("update_from", "default");
             dbcfoNode.put(cfName, cfoName);
         }
         String strJson;
@@ -362,19 +363,6 @@ public class RocksDBOperationUtils {
                 .setMergeOperatorName(MERGE_OPERATOR_NAME);
     }
 
-    // cfoName is not cfName
-    private static void jsonPutCFO(
-            ObjectNode root, ObjectNode cfoMap, String cfoName, ColumnFamilyDescriptor cfd) {
-        ObjectNode cfoNode = cfoMap.putObject(cfoName);
-        cfoNode.put("update_from", "default");
-        ColumnFamilyOptions cfo = cfd.getOptions();
-        // String cfName = new String(cfd.getName());
-        String mergeOpName = cfo.mergeOperatorName();
-        if (mergeOpName != null) {
-            cfoNode.put("merge_operator", "the_" + mergeOpName);
-        }
-    }
-
     private static ColumnFamilyHandle createColumnFamily(
             ColumnFamilyDescriptor columnDescriptor,
             RocksDB db,
@@ -395,7 +383,7 @@ public class RocksDBOperationUtils {
             String cfoName = cfoNameOf(path, cfName);
             ObjectMapper omapper = new ObjectMapper();
             ObjectNode root = omapper.createObjectNode();
-            jsonPutCFO(root, root.putObject("CFOptions"), cfoName, columnDescriptor);
+            root.putObject("CFOptions").putObject(cfoName).put("update_from", "default");
             String strJson;
             try {
                 strJson = omapper.writerWithDefaultPrettyPrinter().writeValueAsString(root);
