@@ -119,6 +119,7 @@ public class RocksDBOperationUtils {
     private static final int TOPLINGDB_DEBUG_LEVEL =
             NumberUtils.toInt(System.getenv("SidePluginRepo_DebugLevel"), 0);
 
+    private static final String FLINK_TOPLING_ROOT = System.getenv("FLINK_TOPLINGDB_ROOT");
     private static final String FLINK_TOPLING_CONF = System.getenv("FLINK_TOPLINGDB_CONF");
 
     static SidePluginRepo loadToplingSidePluginRepo() {
@@ -148,6 +149,19 @@ public class RocksDBOperationUtils {
         if (TOPLINGDB_REPO == null) {
             return RocksDB.open(dbOptions, path, columnFamilyDescriptors, columnFamilyHandles);
         }
+        String dbname = null;
+        if (FLINK_TOPLING_ROOT != null && path.startsWith(FLINK_TOPLING_ROOT)) {
+            int rootLen = FLINK_TOPLING_ROOT.length();
+            while (rootLen > 0 && FLINK_TOPLING_ROOT.charAt(rootLen - 1) == '/') {
+                rootLen--;
+            }
+            if (rootLen + 1 < path.length()) {
+                dbname = path.substring(rootLen + 1);
+            }
+        }
+        if (dbname == null) {
+            dbname = path;
+        }
         String dboName = dboNameOf(path);
         ObjectMapper omapper = new ObjectMapper();
         omapper.disable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
@@ -155,7 +169,7 @@ public class RocksDBOperationUtils {
         ObjectNode root = omapper.createObjectNode();
         root.putObject("DBOptions").putObject(dboName).put("update_from", "dbo");
         ObjectNode cfoMap = root.putObject("CFOptions");
-        ObjectNode dbNode = root.putObject("databases").putObject(path);
+        ObjectNode dbNode = root.putObject("databases").putObject(dbname);
         dbNode.put("method", "DB::Open");
         dbNode = dbNode.putObject("params");
         dbNode.put("db_options", dboName);
@@ -163,7 +177,7 @@ public class RocksDBOperationUtils {
         ObjectNode dbcfoNode = dbNode.putObject("column_families");
         for (ColumnFamilyDescriptor cfd : columnFamilyDescriptors) {
             String cfName = cfd.getName() == null ? "default" : new String(cfd.getName());
-            String cfoName = cfoNameOf(path, cfName);
+            String cfoName = cfoNameOf(dbname, cfName);
             cfoMap.putObject(cfoName).put("update_from", "default");
             dbcfoNode.put(cfName, cfoName);
         }
@@ -179,12 +193,12 @@ public class RocksDBOperationUtils {
         synchronized (TOPLINGDB_REPO) {
             for (ColumnFamilyDescriptor cfdesc : columnFamilyDescriptors) {
                 String cfName = new String(cfdesc.getName());
-                String cfoName = "cfo-" + path + "-" + cfName;
+                String cfoName = cfoNameOf(dbname, cfName);
                 TOPLINGDB_REPO.put(cfoName, cfdesc.getOptions());
             }
             TOPLINGDB_REPO.put(dboName, dbOptions);
             TOPLINGDB_REPO.importJson(strJson);
-            return TOPLINGDB_REPO.openDB(path, columnFamilyHandles);
+            return TOPLINGDB_REPO.openDB(dbname, columnFamilyHandles);
         }
     }
 
